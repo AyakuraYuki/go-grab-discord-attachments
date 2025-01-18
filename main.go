@@ -28,7 +28,7 @@ var (
 	channelID = ``
 
 	// An absolute dir to save attachments, for example, the outputAbsDir is `/path/to/saves`,
-	// groupName is `abc`, channelID is `123`, the final path is `/path/to/saves/DC_abc_123`.
+	// groupName is `abc`, channelID is `123`, the final path is `/path/to/saves/DC-abc-123`.
 	outputAbsDir = ``
 
 	// auth is your Discord API authorization token
@@ -50,16 +50,18 @@ var (
 	// if you want to start from a specified message, input this variable with the
 	// message snowflake id
 	manualBefore = ``
+
+	// maxLoop means the maximum pages you want to scan, I recommend you to set this
+	// value between 1 and 200.
+	// * Automating user accounts us technically against TOS - USE AT YOUR OWN RISK
+	//   IF YOU WANT TO SET IT OVER 200.
+	maxLoop = 1
 )
 
 var (
 	saveDir     string
 	before      string
 	currentLoop int
-)
-
-const (
-	maxLoop = 200
 )
 
 func init() {
@@ -70,7 +72,7 @@ func init() {
 	if manualBefore != "" {
 		before = manualBefore
 	}
-	saveDir = filepath.Join(outputAbsDir, fmt.Sprintf("DC_%s_%s", groupName, channelID))
+	saveDir = filepath.Join(outputAbsDir, fmt.Sprintf("DC-%s-%s", groupName, channelID))
 	_ = os.MkdirAll(saveDir, os.ModePerm)
 }
 
