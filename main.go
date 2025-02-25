@@ -21,12 +21,6 @@ func init() {
 
 // Config variables, change to what you need to grab and where you want to save.
 var (
-	// groupName is Discord group name, used to build the output dirname.
-	groupName = ``
-
-	// channelID is Discord channel snowflake id, used to climb the messages.
-	channelID = ``
-
 	// An absolute dir to save attachments, for example, the outputAbsDir is `/path/to/saves`,
 	// groupName is `abc`, channelID is `123`, the final path is `/path/to/saves/DC-abc-123`.
 	outputAbsDir = ``
@@ -47,50 +41,70 @@ var (
 	// * Automating user accounts us technically against TOS - USE AT YOUR OWN RISK
 	auth = ``
 
-	// if you want to start from a specified message, input this variable with the
-	// message snowflake id
-	manualBefore = ``
-
-	// maxLoop means the maximum pages you want to scan, I recommend you to set this
-	// value between 1 and 200.
-	// * Automating user accounts us technically against TOS - USE AT YOUR OWN RISK
-	//   IF YOU WANT TO SET IT OVER 200.
-	maxLoop = 1
+	// tasks for grabbing
+	tasks = []taskDefinition{
+		// demo tasks, change to the real params
+		{groupName: `abc`, channelID: `123`, before: ``, maxLoop: 20},
+		{groupName: `xyz`, channelID: `789`, before: ``, maxLoop: 20},
+	}
 )
 
-var (
-	saveDir     string
-	before      string
-	currentLoop int
-)
+type taskDefinition struct {
+	groupName string // groupName is Discord group name, used to build the output dirname.
+	channelID string // channelID is Discord channel snowflake id, used to climb the messages.
 
-func init() {
-	if auth == "" || channelID == "" {
-		panic("auth or channel id required")
-	}
-	currentLoop = 0
-	if manualBefore != "" {
-		before = manualBefore
-	}
-	saveDir = filepath.Join(outputAbsDir, fmt.Sprintf("DC-%s-%s", groupName, channelID))
-	_ = os.MkdirAll(saveDir, os.ModePerm)
+	// leave it empty to start from the latest message, or set it with the message snowflake id
+	// if you want to start from a specified message
+	before string
+
+	// maxLoop means the maximum pages you want to scan, I recommend you to set this value
+	// between 1 and 200.
+	// Automating user accounts us technically against TOS - USE AT YOUR OWN RISK IF YOU WANT
+	// TO SET IT OVER 200.
+	maxLoop int
 }
 
 func main() {
+	if auth == "" {
+		panic("auth required")
+	}
+	if len(tasks) == 0 {
+		panic("tasks required")
+	}
+
 	session, err := discordgo.New(auth)
 	if err != nil {
 		panic(fmt.Errorf("error creating Discord session: %v", err))
 	}
 	defer func(bot *discordgo.Session) { _ = bot.Close() }(session)
 
-	for currentLoop < maxLoop {
-		messages, errChannelMessages := session.ChannelMessages(channelID, 100, before, "", "")
+	for i, task := range tasks {
+		executeTask(session, i, task)
+	}
+
+	fmt.Println(colors.Green("done"))
+}
+
+func executeTask(session *discordgo.Session, i int, task taskDefinition) {
+	no := i + 1
+	if task.groupName == "" || task.channelID == "" {
+		fmt.Println(colors.Yellow("** task no.%d with empty group name or channel id, skipped", no))
+		return
+	}
+
+	before := task.before
+	currentLoop := 0
+	saveDir := filepath.Join(outputAbsDir, fmt.Sprintf("DC-%s-%s", task.groupName, task.channelID))
+	_ = os.MkdirAll(saveDir, os.ModePerm)
+
+	for currentLoop < task.maxLoop {
+		messages, errChannelMessages := session.ChannelMessages(task.channelID, 100, before, "", "")
 		if errChannelMessages != nil {
 			fmt.Printf(colors.Red("!! error fetching channel messages: %v", errChannelMessages))
 			break
 		}
 		if len(messages) == 0 {
-			fmt.Println(colors.Green("[done] no more messages, finished"))
+			fmt.Println(colors.Green("no more messages, task no.%d finished", no))
 			return
 		}
 
@@ -136,7 +150,7 @@ func main() {
 		time.Sleep(5 * time.Second)
 	}
 
-	fmt.Println(colors.Green("[reach loop limit] stop at message id %s", before))
+	fmt.Println(colors.Green("[reach loop limit] task no.%d stop at message id %s", no, before))
 }
 
 func isAttachmentHasMedia(attachment *discordgo.MessageAttachment) bool {
