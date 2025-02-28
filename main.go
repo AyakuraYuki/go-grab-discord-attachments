@@ -13,8 +13,8 @@ import (
 	"github.com/AyakuraYuki/go-grab-discord-attachments/colors"
 )
 
+// set http proxy, if you don't want to use a proxy, comment the following lines
 func init() {
-	// set http proxy, if you don't want to use a proxy, comment the following two lines
 	_ = os.Setenv("HTTP_PROXY", "http://127.0.0.1:7890")
 	_ = os.Setenv("HTTPS_PROXY", "http://127.0.0.1:7890")
 }
@@ -48,21 +48,6 @@ var (
 		{groupName: `xyz`, channelID: `789`, before: ``, maxLoop: 20},
 	}
 )
-
-type taskDefinition struct {
-	groupName string // groupName is Discord group name, used to build the output dirname.
-	channelID string // channelID is Discord channel snowflake id, used to climb the messages.
-
-	// leave it empty to start from the latest message, or set it with the message snowflake id
-	// if you want to start from a specified message
-	before string
-
-	// maxLoop means the maximum pages you want to scan, I recommend you to set this value
-	// between 1 and 200.
-	// Automating user accounts us technically against TOS - USE AT YOUR OWN RISK IF YOU WANT
-	// TO SET IT OVER 200.
-	maxLoop int
-}
 
 func main() {
 	if auth == "" {
@@ -114,8 +99,8 @@ func executeTask(session *discordgo.Session, i int, task taskDefinition) {
 				continue
 			}
 			for _, attachment := range message.Attachments {
-				if !isAttachmentHasMedia(attachment) {
-					continue
+				if ok := containsAcceptableAttachment(attachment); !ok {
+					continue // skip unmatched attachment
 				}
 
 				absFilepath := filepath.Join(saveDir, fmt.Sprintf("%s_%s", attachment.ID, attachment.Filename))
@@ -153,10 +138,13 @@ func executeTask(session *discordgo.Session, i int, task taskDefinition) {
 	fmt.Println(colors.Green("[reach loop limit] task no.%d stop at message id %s", no, before))
 }
 
-func isAttachmentHasMedia(attachment *discordgo.MessageAttachment) bool {
+func containsAcceptableAttachment(attachment *discordgo.MessageAttachment) bool {
 	if attachment == nil {
 		return false
 	}
+
+	// feel free to modify the following conditions
+
 	ct := strings.ToLower(attachment.ContentType)
 	if strings.HasPrefix(ct, "image") {
 		return true
@@ -164,6 +152,7 @@ func isAttachmentHasMedia(attachment *discordgo.MessageAttachment) bool {
 	if strings.HasPrefix(ct, "video") {
 		return true
 	}
+
 	return attachment.Width > 0 && attachment.Height > 0
 }
 
@@ -176,4 +165,19 @@ func isPathExist(path string) (bool, error) {
 		return false, nil
 	}
 	return true, err
+}
+
+type taskDefinition struct {
+	groupName string // groupName is Discord group name, used to build the output dirname.
+	channelID string // channelID is Discord channel snowflake id, used to climb the messages.
+
+	// leave it empty to start from the latest message, or set it with the message snowflake id
+	// if you want to start from a specified message
+	before string
+
+	// maxLoop means the maximum pages you want to scan, I recommend you to set this value
+	// between 1 and 200.
+	// Automating user accounts us technically against TOS - USE AT YOUR OWN RISK IF YOU WANT
+	// TO SET IT OVER 200.
+	maxLoop int
 }

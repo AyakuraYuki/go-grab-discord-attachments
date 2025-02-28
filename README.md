@@ -1,2 +1,3 @@
 # go-grab-discord-attachments
-Attachments downloader, a script file, not a prog
+
+Attachments downloader, a script file, not a program
