@@ -95,39 +95,8 @@ func executeTask(session *discordgo.Session, i int, task taskDefinition) {
 
 		for _, message := range messages {
 			before = message.ID
-			if len(message.Attachments) == 0 {
-				continue
-			}
-			for _, attachment := range message.Attachments {
-				if ok := containsAcceptableAttachment(attachment); !ok {
-					continue // skip unmatched attachment
-				}
-
-				absFilepath := filepath.Join(saveDir, fmt.Sprintf("%s_%s", attachment.ID, attachment.Filename))
-				if ok, _ := isPathExist(absFilepath); ok {
-					fmt.Println(colors.Blue("  - skip exist attachment: %s", absFilepath))
-					continue
-				}
-
-				var errDownload error
-				for i := 0; i < 5; i++ {
-					fmt.Println(colors.Cyan("  - download attachment: %s", absFilepath))
-					if _, errDownload = grab.Get(absFilepath, attachment.URL); errDownload == nil {
-						break
-					}
-				}
-				if errDownload != nil {
-					for i := 0; i < 5; i++ {
-						fmt.Println(colors.Cyan("  - download attachment using proxy_url: %s", absFilepath))
-						if _, errDownload = grab.Get(absFilepath, attachment.ProxyURL); errDownload == nil {
-							break
-						}
-					}
-				}
-				if errDownload != nil {
-					fmt.Println(colors.Red("  - (skip) download attachment failed: %s", absFilepath))
-				}
-			}
+			processAttachments(saveDir, message.Attachments)
+			processMessageSnapshot(session, saveDir, message.MessageReference)
 		}
 
 		currentLoop++
@@ -136,6 +105,54 @@ func executeTask(session *discordgo.Session, i int, task taskDefinition) {
 	}
 
 	fmt.Println(colors.Green("[reach loop limit] task no.%d stop at message id %s", no, before))
+}
+
+func processAttachments(saveDir string, attachments []*discordgo.MessageAttachment) {
+	if len(attachments) == 0 {
+		return
+	}
+
+	for _, attachment := range attachments {
+		if ok := containsAcceptableAttachment(attachment); !ok {
+			continue // skip unmatched attachment
+		}
+
+		absFilepath := dstAbsFilePath(saveDir, attachment)
+		if ok, _ := isPathExist(absFilepath); ok {
+			fmt.Println(colors.Blue("  - skip exist attachment: %s", absFilepath))
+			continue
+		}
+
+		var errDownload error
+		for i := 0; i < 5; i++ {
+			fmt.Println(colors.Cyan("  - download attachment: %s", absFilepath))
+			if _, errDownload = grab.Get(absFilepath, attachment.URL); errDownload == nil {
+				break
+			}
+		}
+		if errDownload != nil {
+			for i := 0; i < 5; i++ {
+				fmt.Println(colors.Cyan("  - download attachment using proxy_url: %s", absFilepath))
+				if _, errDownload = grab.Get(absFilepath, attachment.ProxyURL); errDownload == nil {
+					break
+				}
+			}
+		}
+		if errDownload != nil {
+			fmt.Println(colors.Red("  - (skip) download attachment failed: %s", absFilepath))
+		}
+	}
+}
+
+func processMessageSnapshot(session *discordgo.Session, saveDir string, reference *discordgo.MessageReference) {
+	if reference == nil {
+		return
+	}
+	message, _ := session.ChannelMessage(reference.ChannelID, reference.MessageID)
+	if message == nil || len(message.Attachments) == 0 {
+		return
+	}
+	processAttachments(saveDir, message.Attachments)
 }
 
 func containsAcceptableAttachment(attachment *discordgo.MessageAttachment) bool {
@@ -154,6 +171,13 @@ func containsAcceptableAttachment(attachment *discordgo.MessageAttachment) bool 
 	}
 
 	return attachment.Width > 0 && attachment.Height > 0
+}
+
+func dstAbsFilePath(saveDir string, attachment *discordgo.MessageAttachment) string {
+	if attachment == nil {
+		return ""
+	}
+	return filepath.Join(saveDir, fmt.Sprintf("%s_%s", attachment.ID, attachment.Filename))
 }
 
 func isPathExist(path string) (bool, error) {
