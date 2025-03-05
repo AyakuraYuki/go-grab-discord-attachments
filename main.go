@@ -203,7 +203,10 @@ func processEmbeds(saveDir string, message *discordgo.Message) {
 }
 
 func processEmbedMedia(saveDir, messageID string, index int, mURL, proxyURL, defaultFilename string) {
-	absFilepath := dstEmbedMediaAbsFilePath(saveDir, messageID, index, mURL, proxyURL, defaultFilename)
+	absFilepath, oldAbsFilepath := dstEmbedMediaAbsFilePath(saveDir, messageID, index, mURL, proxyURL, defaultFilename)
+	if ok, _ := isPathExist(oldAbsFilepath); ok {
+		_ = os.Remove(oldAbsFilepath)
+	}
 	if ok, _ := isPathExist(absFilepath); ok {
 		fmt.Println(colors.Blue("  - skip exist embed media: %s", absFilepath))
 		return
@@ -231,7 +234,7 @@ func processEmbedMedia(saveDir, messageID string, index int, mURL, proxyURL, def
 	}
 }
 
-func dstEmbedMediaAbsFilePath(saveDir, messageID string, index int, mURL, proxyURL, defaultFilename string) string {
+func dstEmbedMediaAbsFilePath(saveDir, messageID string, index int, mURL, proxyURL, defaultFilename string) (new, old string) {
 	h := md5.New()
 	h.Write([]byte(fmt.Sprintf("%s_%s", messageID, mURL)))
 	m := hex.EncodeToString(h.Sum(nil))
@@ -242,9 +245,11 @@ func dstEmbedMediaAbsFilePath(saveDir, messageID string, index int, mURL, proxyU
 	if ext == "" {
 		ext = filepath.Ext(defaultFilename)
 	}
-	re := regexp.MustCompile(`\.[a-zA-Z0-9]+`)
+	reOld := regexp.MustCompile(`\.[a-zA-Z0-9]+`)
+	extOld := reOld.FindString(ext)
+	re := regexp.MustCompile(`\.[a-zA-Z0-9]+(\.[a-zA-Z0-9]+)*`)
 	ext = re.FindString(ext)
-	return filepath.Join(saveDir, fmt.Sprintf("%s_embed_%d_%s%s", messageID, index, m, ext))
+	return filepath.Join(saveDir, fmt.Sprintf("%s_embed_%d_%s%s", messageID, index, m, ext)), filepath.Join(saveDir, fmt.Sprintf("%s_embed_%d_%s%s", messageID, index, m, extOld))
 }
 
 // ----------------------------------------------------------------------------------------------------
