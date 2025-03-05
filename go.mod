@@ -3,7 +3,7 @@ module github.com/AyakuraYuki/go-grab-discord-attachments
 go 1.23.5
 
 require (
-	github.com/bwmarrin/discordgo v0.28.1
+	github.com/bwmarrin/discordgo v0.28.2-0.20250304101356-2d15f13e65ae
 	github.com/cavaliergopher/grab/v3 v3.0.1
 	github.com/fatih/color v1.18.0
 )

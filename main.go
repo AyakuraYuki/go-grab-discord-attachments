@@ -96,7 +96,8 @@ func executeTask(session *discordgo.Session, i int, task taskDefinition) {
 		for _, message := range messages {
 			before = message.ID
 			processAttachments(saveDir, message.Attachments)
-			processReferencedMessage(saveDir, message.ReferencedMessage)
+			processMessage(saveDir, message.ReferencedMessage)
+			processMessageSnapshot(saveDir, message.MessageSnapshots)
 		}
 
 		currentLoop++
@@ -144,11 +145,20 @@ func processAttachments(saveDir string, attachments []*discordgo.MessageAttachme
 	}
 }
 
-func processReferencedMessage(saveDir string, referencedMessage *discordgo.Message) {
-	if referencedMessage == nil || len(referencedMessage.Attachments) == 0 {
+func processMessage(saveDir string, message *discordgo.Message) {
+	if message == nil || len(message.Attachments) == 0 {
 		return
 	}
-	processAttachments(saveDir, referencedMessage.Attachments)
+	processAttachments(saveDir, message.Attachments)
+}
+
+func processMessageSnapshot(saveDir string, messageSnapshots []discordgo.MessageSnapshot) {
+	if len(messageSnapshots) == 0 {
+		return
+	}
+	for _, snapshot := range messageSnapshots {
+		processMessage(saveDir, snapshot.Message)
+	}
 }
 
 func containsAcceptableAttachment(attachment *discordgo.MessageAttachment) bool {
