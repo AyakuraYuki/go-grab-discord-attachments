@@ -1,6 +1,8 @@
 package main
 
 import (
+	"crypto/md5"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -70,6 +72,8 @@ func main() {
 	fmt.Println(colors.Green("done"))
 }
 
+// ----------------------------------------------------------------------------------------------------
+
 func executeTask(session *discordgo.Session, i int, task taskDefinition) {
 	no := i + 1
 	if task.groupName == "" || task.channelID == "" {
@@ -96,6 +100,7 @@ func executeTask(session *discordgo.Session, i int, task taskDefinition) {
 		for _, message := range messages {
 			before = message.ID
 			processAttachments(saveDir, message.Attachments)
+			processEmbeds(saveDir, message)
 			processMessage(saveDir, message.ReferencedMessage)
 			processMessageSnapshot(saveDir, message.MessageSnapshots)
 		}
@@ -107,6 +112,8 @@ func executeTask(session *discordgo.Session, i int, task taskDefinition) {
 
 	fmt.Println(colors.Green("[reach loop limit] task no.%d stop at message id %s", no, before))
 }
+
+// ----------------------------------------------------------------------------------------------------
 
 func processAttachments(saveDir string, attachments []*discordgo.MessageAttachment) {
 	if len(attachments) == 0 {
@@ -161,6 +168,84 @@ func processMessageSnapshot(saveDir string, messageSnapshots []discordgo.Message
 	}
 }
 
+func dstAbsFilePath(saveDir string, attachment *discordgo.MessageAttachment) string {
+	if attachment == nil {
+		return ""
+	}
+	return filepath.Join(saveDir, fmt.Sprintf("%s_%s", attachment.ID, attachment.Filename))
+}
+
+// ----------------------------------------------------------------------------------------------------
+
+func processEmbeds(saveDir string, message *discordgo.Message) {
+	if len(message.Embeds) == 0 {
+		return
+	}
+	for i, embed := range message.Embeds {
+		if embed == nil {
+			continue
+		}
+		if embed.Image != nil {
+			mURL := embed.Image.URL
+			if strings.Contains(mURL, "cdn.discordapp.com") && strings.Contains(mURL, "?") {
+				mURL = mURL[:strings.Index(mURL, "?")]
+			}
+			processEmbedMedia(saveDir, message.ID, i, mURL, embed.Image.ProxyURL, "eb_res.jpg")
+		}
+		if embed.Thumbnail != nil {
+			processEmbedMedia(saveDir, message.ID, i, embed.Thumbnail.URL, embed.Thumbnail.ProxyURL, "eb_res.jpg")
+		}
+		if embed.Video != nil {
+			processEmbedMedia(saveDir, message.ID, i, embed.Video.URL, "", "eb_res.mp4")
+		}
+	}
+}
+
+func processEmbedMedia(saveDir, messageID string, index int, mURL, proxyURL, defaultFilename string) {
+	absFilepath := dstEmbedMediaAbsFilePath(saveDir, messageID, index, mURL, proxyURL, defaultFilename)
+	if ok, _ := isPathExist(absFilepath); ok {
+		fmt.Println(colors.Blue("  - skip exist embed media: %s", absFilepath))
+		return
+	}
+
+	var errDownload error
+	for i := 0; i < 5; i++ {
+		fmt.Println(colors.Cyan("  - download embed media: %s", absFilepath))
+		if _, errDownload = grab.Get(absFilepath, mURL); errDownload == nil {
+			break
+		}
+	}
+	if errDownload != nil {
+		for i := 0; i < 5; i++ {
+			fmt.Println(colors.Cyan("  - download embed media using proxy_url: %s", absFilepath))
+			if _, errDownload = grab.Get(absFilepath, proxyURL); errDownload == nil {
+				break
+			}
+		}
+	}
+	if errDownload != nil {
+		fmt.Println(colors.Red("  - (skip) download embed media failed: %s", absFilepath))
+		fmt.Println(colors.Red("    - url: %s", mURL))
+		fmt.Println(colors.Red("    - proxy url: %s", proxyURL))
+	}
+}
+
+func dstEmbedMediaAbsFilePath(saveDir, messageID string, index int, mURL, proxyURL, defaultFilename string) string {
+	h := md5.New()
+	h.Write([]byte(fmt.Sprintf("%s_%s", messageID, mURL)))
+	m := hex.EncodeToString(h.Sum(nil))
+	ext := filepath.Ext(mURL)
+	if ext == "" {
+		ext = filepath.Ext(proxyURL)
+	}
+	if ext == "" {
+		ext = filepath.Ext(defaultFilename)
+	}
+	return filepath.Join(saveDir, fmt.Sprintf("%s_embed_%d_%s%s", messageID, index, m, ext))
+}
+
+// ----------------------------------------------------------------------------------------------------
+
 func containsAcceptableAttachment(attachment *discordgo.MessageAttachment) bool {
 	if attachment == nil {
 		return false
@@ -177,13 +262,6 @@ func containsAcceptableAttachment(attachment *discordgo.MessageAttachment) bool 
 	}
 
 	return attachment.Width > 0 && attachment.Height > 0
-}
-
-func dstAbsFilePath(saveDir string, attachment *discordgo.MessageAttachment) string {
-	if attachment == nil {
-		return ""
-	}
-	return filepath.Join(saveDir, fmt.Sprintf("%s_%s", attachment.ID, attachment.Filename))
 }
 
 func isPathExist(path string) (bool, error) {
