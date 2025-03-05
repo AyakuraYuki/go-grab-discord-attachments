@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -241,6 +242,8 @@ func dstEmbedMediaAbsFilePath(saveDir, messageID string, index int, mURL, proxyU
 	if ext == "" {
 		ext = filepath.Ext(defaultFilename)
 	}
+	re := regexp.MustCompile(`\.[a-zA-Z0-9]+`)
+	ext = re.FindString(ext)
 	return filepath.Join(saveDir, fmt.Sprintf("%s_embed_%d_%s%s", messageID, index, m, ext))
 }
 
