@@ -1,9 +1,14 @@
+// Automating user accounts us technically against TOS - USE AT YOUR OWN RISK IF YOU WANT
+// Automating user accounts us technically against TOS - USE AT YOUR OWN RISK IF YOU WANT
+// Automating user accounts us technically against TOS - USE AT YOUR OWN RISK IF YOU WANT
+
 package main
 
 import (
 	"crypto/md5"
 	"encoding/hex"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -16,7 +21,8 @@ import (
 	"github.com/AyakuraYuki/go-grab-discord-attachments/colors"
 )
 
-// set http proxy, if you don't want to use a proxy, comment the following lines
+// set http proxy for grab.Get
+// comment the init method if you don't want to use a proxy
 func init() {
 	_ = os.Setenv("HTTP_PROXY", "http://127.0.0.1:7890")
 	_ = os.Setenv("HTTPS_PROXY", "http://127.0.0.1:7890")
@@ -45,143 +51,146 @@ var (
 	auth = ``
 
 	// tasks for grabbing
-	tasks = []taskDefinition{
+	tasks = []*Task{
 		// demo tasks, change to the real params
-		{groupName: `abc`, channelID: `123`, before: ``, maxLoop: 20},
-		{groupName: `xyz`, channelID: `789`, before: ``, maxLoop: 20},
+		NewTask(`abc`, `123`),
+		NewTask(`xyz`, `789`),
 	}
 )
 
-func main() {
-	if auth == "" {
-		panic("auth required")
-	}
-	if len(tasks) == 0 {
-		panic("tasks required")
-	}
+type Options func(t *Task)
 
-	session, err := discordgo.New(auth)
-	if err != nil {
-		panic(fmt.Errorf("error creating Discord session: %v", err))
-	}
-	defer func(bot *discordgo.Session) { _ = bot.Close() }(session)
-
-	for i, task := range tasks {
-		executeTask(session, i, task)
-	}
-
-	fmt.Println(colors.Green("done"))
+func DebugMode(val bool) Options      { return func(t *Task) { t.debug = val } }
+func WithBeforeID(val string) Options { return func(t *Task) { t.beforeID = val } }
+func WithMaxLoop(val uint) Options    { return func(t *Task) { t.maxLoop = val } }
+func WithSize(val uint) Options       { return func(t *Task) { t.size = val } }
+func WithRetry(val uint) Options      { return func(t *Task) { t.retry = val } }
+func WithAttachmentFilter(filter func(*discordgo.MessageAttachment) bool) Options {
+	return func(t *Task) { t.attachmentFilter = filter }
 }
 
-// ----------------------------------------------------------------------------------------------------
+type Task struct {
+	GuildName string // discord guild name, like "Discord Developers", is used to build the output dirname
+	ChannelID string // the snowflake ID of the channel, used to climb the messages
 
-func executeTask(session *discordgo.Session, i int, task taskDefinition) {
-	no := i + 1
-	if task.groupName == "" || task.channelID == "" {
-		fmt.Println(colors.Yellow("** task no.%d with empty group name or channel id, skipped", no))
+	beforeID         string // message ID, if provided all messages returned will be before given ID
+	maxLoop          uint   // means the maximum pages you want to scan
+	saveDir          string
+	currentLoop      uint
+	size             uint
+	retry            uint
+	attachmentFilter func(*discordgo.MessageAttachment) bool
+
+	debug bool
+}
+
+func NewTask(guildName, channelID string, opts ...Options) *Task {
+	t := &Task{
+		GuildName: guildName,
+		ChannelID: channelID,
+
+		beforeID:         "",
+		maxLoop:          5,
+		saveDir:          filepath.Join(outputAbsDir, fmt.Sprintf("DC-%s-%s", guildName, channelID)),
+		currentLoop:      0,
+		size:             100,
+		retry:            5,
+		attachmentFilter: defaultAttachmentFilter,
+
+		debug: false,
+	}
+	for _, opt := range opts {
+		opt(t)
+	}
+	return t
+}
+
+func (t *Task) Execute(session *discordgo.Session) {
+	if t.GuildName == "" || t.ChannelID == "" {
+		logError(t, "invalid argument: GuildName and ChannelID must be set")
 		return
 	}
 
-	before := task.before
-	currentLoop := 0
-	saveDir := filepath.Join(outputAbsDir, fmt.Sprintf("DC-%s-%s", task.groupName, task.channelID))
-	_ = os.MkdirAll(saveDir, os.ModePerm)
+	_ = os.MkdirAll(t.saveDir, os.ModePerm)
 
-	for currentLoop < task.maxLoop {
-		messages, errChannelMessages := session.ChannelMessages(task.channelID, 100, before, "", "")
-		if errChannelMessages != nil {
-			fmt.Printf(colors.Red("!! error fetching channel messages: %v", errChannelMessages))
+	for t.currentLoop < t.maxLoop {
+		messages, err := session.ChannelMessages(t.ChannelID, int(t.size), t.beforeID, "", "")
+		if err != nil {
+			logError(t, fmt.Sprintf("!! error fetching channel messages: %s", err))
 			break
 		}
 		if len(messages) == 0 {
-			fmt.Println(colors.Green("no more messages, task no.%d finished", no))
+			logInfo(t, "no more message, task finished")
 			return
 		}
 
 		for _, message := range messages {
-			before = message.ID
-			processAttachments(saveDir, message.Attachments)
-			processEmbeds(saveDir, message)
-			processMessage(saveDir, message.ReferencedMessage)
-			processMessageSnapshot(saveDir, message.MessageSnapshots)
+			t.beforeID = message.ID
+			t.processAttachments(message.Attachments)
+			t.processEmbeds(message)
+			t.processMessage(message.ReferencedMessage)
+			t.processMessageSnapshot(message.MessageSnapshots)
 		}
 
-		currentLoop++
-		fmt.Println(colors.Yellow("next scan start at message id %s, wait 5 seconds to start...", before))
+		t.currentLoop++
+		logInfo(t, fmt.Sprintf("next scan start at message id %s, wait 5 seconds to start...", t.beforeID))
 		time.Sleep(5 * time.Second)
 	}
 
-	fmt.Println(colors.Green("[reach loop limit] task no.%d stop at message id %s", no, before))
+	logInfo(t, fmt.Sprintf("reach the max loop, stop at message id %s", t.beforeID))
 }
 
-// ----------------------------------------------------------------------------------------------------
-
-func processAttachments(saveDir string, attachments []*discordgo.MessageAttachment) {
-	if len(attachments) == 0 {
-		return
+func (t *Task) download(resource, saveTo, mURL string, retry uint) (err error) {
+	if retry == 0 {
+		logInfo(t, fmt.Sprintf("downloading %s", mURL))
+	} else {
+		logInfo(t, fmt.Sprintf("(retry %d) downloading %s", retry, mURL))
 	}
 
-	for _, attachment := range attachments {
-		if ok := containsAcceptableAttachment(attachment); !ok {
-			continue // skip unmatched attachment
-		}
+	if _, err = grab.Get(saveTo, mURL); err == nil {
+		logInfo(t, fmt.Sprintf("downloaded %s: %s", resource, saveTo))
+		return nil
+	}
+	return err
+}
 
-		absFilepath := dstAbsFilePath(saveDir, attachment)
-		if ok, _ := isPathExist(absFilepath); ok {
-			fmt.Println(colors.Blue("  - skip exist attachment: %s", absFilepath))
+func (t *Task) processAttachments(attachments []*discordgo.MessageAttachment) {
+	for _, attachment := range attachments {
+		if ok := t.attachmentFilter(attachment); !ok {
 			continue
 		}
 
-		var errDownload error
-		for i := 0; i < 5; i++ {
-			fmt.Println(colors.Cyan("  - download attachment: %s", absFilepath))
-			if _, errDownload = grab.Get(absFilepath, attachment.URL); errDownload == nil {
+		saveTo := filepath.Join(t.saveDir, fmt.Sprintf("%s_%s", attachment.ID, attachment.Filename))
+		if ok, _ := isPathExist(saveTo); ok {
+			if t.debug {
+				logWarn(t, fmt.Sprintf("skip exist attachment: %s", saveTo))
+			}
+			continue
+		}
+
+		var err error
+		for retry := uint(0); retry < t.retry; retry++ {
+			if err = t.download("attachment", saveTo, attachment.URL, retry); err == nil {
 				break
 			}
 		}
-		if errDownload != nil {
-			for i := 0; i < 5; i++ {
-				fmt.Println(colors.Cyan("  - download attachment using proxy_url: %s", absFilepath))
-				if _, errDownload = grab.Get(absFilepath, attachment.ProxyURL); errDownload == nil {
-					break
-				}
+		if err == nil {
+			continue
+		}
+		for retry := uint(0); retry < t.retry; retry++ {
+			if err = t.download("attachment", saveTo, attachment.ProxyURL, retry); err == nil {
+				break
 			}
 		}
-		if errDownload != nil {
-			fmt.Println(colors.Red("  - (skip) download attachment failed: %s", absFilepath))
+		if err != nil {
+			logWarn(t, fmt.Sprintf("fail to download attachment: %s", saveTo))
+			logWarn(t, fmt.Sprintf("    - url: %s", attachment.URL))
+			logWarn(t, fmt.Sprintf("    - proxy_url: %s", attachment.ProxyURL))
 		}
 	}
 }
 
-func processMessage(saveDir string, message *discordgo.Message) {
-	if message == nil || len(message.Attachments) == 0 {
-		return
-	}
-	processAttachments(saveDir, message.Attachments)
-}
-
-func processMessageSnapshot(saveDir string, messageSnapshots []discordgo.MessageSnapshot) {
-	if len(messageSnapshots) == 0 {
-		return
-	}
-	for _, snapshot := range messageSnapshots {
-		processMessage(saveDir, snapshot.Message)
-	}
-}
-
-func dstAbsFilePath(saveDir string, attachment *discordgo.MessageAttachment) string {
-	if attachment == nil {
-		return ""
-	}
-	return filepath.Join(saveDir, fmt.Sprintf("%s_%s", attachment.ID, attachment.Filename))
-}
-
-// ----------------------------------------------------------------------------------------------------
-
-func processEmbeds(saveDir string, message *discordgo.Message) {
-	if len(message.Embeds) == 0 {
-		return
-	}
+func (t *Task) processEmbeds(message *discordgo.Message) {
 	for i, embed := range message.Embeds {
 		if embed == nil {
 			continue
@@ -191,53 +200,67 @@ func processEmbeds(saveDir string, message *discordgo.Message) {
 			if strings.Contains(mURL, "cdn.discordapp.com") && strings.Contains(mURL, "?") {
 				mURL = mURL[:strings.Index(mURL, "?")]
 			}
-			processEmbedMedia(saveDir, message.ID, i, mURL, embed.Image.ProxyURL, "eb_res.jpg")
+			t.processEmbedMedia(i, message.ID, mURL, embed.Image.ProxyURL, "eb_res.jpg")
 		}
 		if embed.Thumbnail != nil {
-			processEmbedMedia(saveDir, message.ID, i, embed.Thumbnail.URL, embed.Thumbnail.ProxyURL, "eb_res.jpg")
+			t.processEmbedMedia(i, message.ID, embed.Thumbnail.URL, embed.Thumbnail.ProxyURL, "eb_res.jpg")
 		}
 		if embed.Video != nil {
-			processEmbedMedia(saveDir, message.ID, i, embed.Video.URL, "", "eb_res.mp4")
+			t.processEmbedMedia(i, message.ID, embed.Video.URL, "", "eb_res.mp4")
 		}
 	}
 }
 
-func processEmbedMedia(saveDir, messageID string, index int, mURL, proxyURL, defaultFilename string) {
-	absFilepath, oldAbsFilepath := dstEmbedMediaAbsFilePath(saveDir, messageID, index, mURL, proxyURL, defaultFilename)
-	if ok, _ := isPathExist(oldAbsFilepath); ok {
-		_ = os.Remove(oldAbsFilepath)
+func (t *Task) processEmbedMedia(index int, messageID, mURL, proxyURL, defaultFilename string) {
+	saveTo, oldSaveTo := t.embedMediaSaveTo(index, messageID, mURL, proxyURL, defaultFilename)
+	if ok, _ := isPathExist(oldSaveTo); ok {
+		_ = os.Remove(oldSaveTo)
 	}
-	if ok, _ := isPathExist(absFilepath); ok {
-		fmt.Println(colors.Blue("  - skip exist embed media: %s", absFilepath))
+	if ok, _ := isPathExist(saveTo); ok {
+		if t.debug {
+			logWarn(t, fmt.Sprintf("skip exist embed media: %s", saveTo))
+		}
 		return
 	}
 
-	var errDownload error
-	for i := 0; i < 5; i++ {
-		fmt.Println(colors.Cyan("  - download embed media: %s", absFilepath))
-		if _, errDownload = grab.Get(absFilepath, mURL); errDownload == nil {
+	var err error
+	for retry := uint(0); retry < t.retry; retry++ {
+		if err = t.download("embed media", saveTo, mURL, retry); err == nil {
 			break
 		}
 	}
-	if errDownload != nil {
-		for i := 0; i < 5; i++ {
-			fmt.Println(colors.Cyan("  - download embed media using proxy_url: %s", absFilepath))
-			if _, errDownload = grab.Get(absFilepath, proxyURL); errDownload == nil {
-				break
-			}
+	if err == nil {
+		return
+	}
+	for retry := uint(0); retry < t.retry; retry++ {
+		if err = t.download("embed media", saveTo, proxyURL, retry); err == nil {
+			break
 		}
 	}
-	if errDownload != nil {
-		fmt.Println(colors.Red("  - (skip) download embed media failed: %s", absFilepath))
-		fmt.Println(colors.Red("    - url: %s", mURL))
-		fmt.Println(colors.Red("    - proxy url: %s", proxyURL))
+	if err != nil {
+		logWarn(t, fmt.Sprintf("fail to download embed media: %s", saveTo))
+		logWarn(t, fmt.Sprintf("    - url: %s", mURL))
+		logWarn(t, fmt.Sprintf("    - proxy_url: %s", proxyURL))
 	}
 }
 
-func dstEmbedMediaAbsFilePath(saveDir, messageID string, index int, mURL, proxyURL, defaultFilename string) (new, old string) {
+func (t *Task) processMessage(message *discordgo.Message) {
+	if message != nil && len(message.Attachments) > 0 {
+		t.processAttachments(message.Attachments)
+	}
+}
+
+func (t *Task) processMessageSnapshot(snapshots []discordgo.MessageSnapshot) {
+	for _, snapshot := range snapshots {
+		t.processMessage(snapshot.Message)
+	}
+}
+
+func (t *Task) embedMediaSaveTo(index int, messageID, mURL, proxyURL, defaultFilename string) (new, old string) {
 	h := md5.New()
 	h.Write([]byte(fmt.Sprintf("%s_%s", messageID, mURL)))
 	m := hex.EncodeToString(h.Sum(nil))
+
 	ext := filepath.Ext(mURL)
 	if ext == "" {
 		ext = filepath.Ext(proxyURL)
@@ -245,22 +268,22 @@ func dstEmbedMediaAbsFilePath(saveDir, messageID string, index int, mURL, proxyU
 	if ext == "" {
 		ext = filepath.Ext(defaultFilename)
 	}
+
 	reOld := regexp.MustCompile(`\.[a-zA-Z0-9]+`)
 	extOld := reOld.FindString(ext)
+
 	re := regexp.MustCompile(`\.[a-zA-Z0-9]+(\.[a-zA-Z0-9]+)*`)
 	ext = re.FindString(ext)
-	return filepath.Join(saveDir, fmt.Sprintf("%s_embed_%d_%s%s", messageID, index, m, ext)), filepath.Join(saveDir, fmt.Sprintf("%s_embed_%d_%s%s", messageID, index, m, extOld))
+
+	new = filepath.Join(t.saveDir, fmt.Sprintf("%s_embed_%d_%s%s", messageID, index, m, ext))
+	old = filepath.Join(t.saveDir, fmt.Sprintf("%s_embed_%d_%s%s", messageID, index, m, extOld))
+	return
 }
 
-// ----------------------------------------------------------------------------------------------------
-
-func containsAcceptableAttachment(attachment *discordgo.MessageAttachment) bool {
+func defaultAttachmentFilter(attachment *discordgo.MessageAttachment) bool {
 	if attachment == nil {
 		return false
 	}
-
-	// feel free to modify the following conditions
-
 	ct := strings.ToLower(attachment.ContentType)
 	if strings.HasPrefix(ct, "image") {
 		return true
@@ -268,7 +291,6 @@ func containsAcceptableAttachment(attachment *discordgo.MessageAttachment) bool 
 	if strings.HasPrefix(ct, "video") {
 		return true
 	}
-
 	return attachment.Width > 0 && attachment.Height > 0
 }
 
@@ -283,17 +305,14 @@ func isPathExist(path string) (bool, error) {
 	return true, err
 }
 
-type taskDefinition struct {
-	groupName string // groupName is Discord group name, used to build the output dirname.
-	channelID string // channelID is Discord channel snowflake id, used to climb the messages.
+func logInfo(task *Task, message string) {
+	log.Printf(fmt.Sprintf("[%s.%s] %s", task.GuildName, task.ChannelID, colors.Green(message)))
+}
 
-	// leave it empty to start from the latest message, or set it with the message snowflake id
-	// if you want to start from a specified message
-	before string
+func logWarn(task *Task, message string) {
+	log.Printf(fmt.Sprintf("[%s.%s] %s", task.GuildName, task.ChannelID, colors.Yellow(message)))
+}
 
-	// maxLoop means the maximum pages you want to scan, I recommend you to set this value
-	// between 1 and 200.
-	// Automating user accounts us technically against TOS - USE AT YOUR OWN RISK IF YOU WANT
-	// TO SET IT OVER 200.
-	maxLoop int
+func logError(task *Task, message string) {
+	log.Printf(fmt.Sprintf("[%s.%s] %s", task.GuildName, task.ChannelID, colors.Red(message)))
 }
