@@ -58,6 +58,21 @@ var (
 	}
 )
 
+func main() {
+	if len(tasks) == 0 {
+		log.Fatalln("no tasks")
+	}
+	session, err := discordgo.New(auth)
+	if err != nil {
+		log.Fatalln(fmt.Sprintf("error creating discord session: %v", err))
+	}
+	defer func(session *discordgo.Session) { _ = session.Close() }(session)
+	for _, task := range tasks {
+		task.Execute(session)
+	}
+	log.Println(colors.Green("done"))
+}
+
 type Options func(t *Task)
 
 func DebugMode(val bool) Options      { return func(t *Task) { t.debug = val } }
