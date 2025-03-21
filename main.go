@@ -17,8 +17,6 @@ import (
 
 	"github.com/bwmarrin/discordgo"
 	"github.com/cavaliergopher/grab/v3"
-
-	"github.com/AyakuraYuki/go-grab-discord-attachments/colors"
 )
 
 // set http proxy for grab.Get
@@ -70,7 +68,7 @@ func main() {
 	for _, task := range tasks {
 		task.Execute(session)
 	}
-	log.Println(colors.Green("done"))
+	log.Println("done")
 }
 
 type Options func(t *Task)
@@ -88,15 +86,15 @@ type Task struct {
 	GuildName string // discord guild name, like "Discord Developers", is used to build the output dirname
 	ChannelID string // the snowflake ID of the channel, used to climb the messages
 
+	debug            bool   // verbose logs
 	beforeID         string // message ID, if provided all messages returned will be before given ID
 	maxLoop          uint   // means the maximum pages you want to scan
-	saveDir          string
-	currentLoop      uint
 	size             uint
 	retry            uint
 	attachmentFilter func(*discordgo.MessageAttachment) bool
 
-	debug bool
+	saveDir     string
+	currentLoop uint
 }
 
 func NewTask(guildName, channelID string, opts ...Options) *Task {
@@ -227,10 +225,7 @@ func (t *Task) processEmbeds(message *discordgo.Message) {
 }
 
 func (t *Task) processEmbedMedia(index int, messageID, mURL, proxyURL, defaultFilename string) {
-	saveTo, oldSaveTo := t.embedMediaSaveTo(index, messageID, mURL, proxyURL, defaultFilename)
-	if ok, _ := isPathExist(oldSaveTo); ok {
-		_ = os.Remove(oldSaveTo)
-	}
+	saveTo := t.embedMediaSaveTo(index, messageID, mURL, proxyURL, defaultFilename)
 	if ok, _ := isPathExist(saveTo); ok {
 		if t.debug {
 			logWarn(t, fmt.Sprintf("skip exist embed media: %s", saveTo))
@@ -271,7 +266,7 @@ func (t *Task) processMessageSnapshot(snapshots []discordgo.MessageSnapshot) {
 	}
 }
 
-func (t *Task) embedMediaSaveTo(index int, messageID, mURL, proxyURL, defaultFilename string) (new, old string) {
+func (t *Task) embedMediaSaveTo(index int, messageID, mURL, proxyURL, defaultFilename string) (new string) {
 	h := md5.New()
 	h.Write([]byte(fmt.Sprintf("%s_%s", messageID, mURL)))
 	m := hex.EncodeToString(h.Sum(nil))
@@ -284,15 +279,10 @@ func (t *Task) embedMediaSaveTo(index int, messageID, mURL, proxyURL, defaultFil
 		ext = filepath.Ext(defaultFilename)
 	}
 
-	reOld := regexp.MustCompile(`\.[a-zA-Z0-9]+`)
-	extOld := reOld.FindString(ext)
-
 	re := regexp.MustCompile(`\.[a-zA-Z0-9]+(\.[a-zA-Z0-9]+)*`)
 	ext = re.FindString(ext)
 
-	new = filepath.Join(t.saveDir, fmt.Sprintf("%s_embed_%d_%s%s", messageID, index, m, ext))
-	old = filepath.Join(t.saveDir, fmt.Sprintf("%s_embed_%d_%s%s", messageID, index, m, extOld))
-	return
+	return filepath.Join(t.saveDir, fmt.Sprintf("%s_embed_%d_%s%s", messageID, index, m, ext))
 }
 
 func defaultAttachmentFilter(attachment *discordgo.MessageAttachment) bool {
@@ -321,13 +311,16 @@ func isPathExist(path string) (bool, error) {
 }
 
 func logInfo(task *Task, message string) {
-	log.Printf(fmt.Sprintf("[%s.%s] %s", task.GuildName, task.ChannelID, colors.Green(message)))
+	taskName := fmt.Sprintf("[%s.%s]", task.GuildName, task.ChannelID)
+	log.Printf(taskName + " " + message)
 }
 
 func logWarn(task *Task, message string) {
-	log.Printf(fmt.Sprintf("[%s.%s] %s", task.GuildName, task.ChannelID, colors.Yellow(message)))
+	taskName := fmt.Sprintf("[%s.%s]", task.GuildName, task.ChannelID)
+	log.Printf(taskName + " " + message)
 }
 
 func logError(task *Task, message string) {
-	log.Printf(fmt.Sprintf("[%s.%s] %s", task.GuildName, task.ChannelID, colors.Red(message)))
+	taskName := fmt.Sprintf("[%s.%s]", task.GuildName, task.ChannelID)
+	log.Printf(taskName + " " + message)
 }
