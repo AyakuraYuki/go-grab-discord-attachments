@@ -160,7 +160,10 @@ func (t *Task) download(resource, saveTo, mURL string, retry uint) (err error) {
 		logInfo(t, fmt.Sprintf("(retry %d) downloading %s", retry, mURL))
 	}
 
-	if _, err = grab.Get(saveTo, mURL); err == nil {
+	tmpPath := saveTo + ".tmp"
+	_ = os.Remove(tmpPath)
+	if _, err = grab.Get(tmpPath, mURL); err == nil {
+		_ = os.Rename(tmpPath, saveTo)
 		logInfo(t, fmt.Sprintf("downloaded %s: %s", resource, saveTo))
 		return nil
 	}
