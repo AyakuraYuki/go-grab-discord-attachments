@@ -155,9 +155,9 @@ func (t *Task) Execute(session *discordgo.Session) {
 
 func (t *Task) download(resource, saveTo, mURL string, retry uint) (err error) {
 	if retry == 0 {
-		logInfo(t, fmt.Sprintf("downloading %s", mURL))
+		logInfo(t, "downloading "+mURL)
 	} else {
-		logInfo(t, fmt.Sprintf("(retry %d) downloading %s", retry, mURL))
+		logInfo(t, fmt.Sprintf("(retry %d)", retry)+" downloading "+mURL)
 	}
 
 	tmpPath := saveTo + ".tmp"
