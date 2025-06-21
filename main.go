@@ -146,8 +146,8 @@ func (t *Task) Execute(session *discordgo.Session) {
 		}
 
 		t.currentLoop++
-		logInfo(t, fmt.Sprintf("next scan start at message id %s, wait 5 seconds to start...", t.beforeID))
-		time.Sleep(5 * time.Second)
+		logInfo(t, fmt.Sprintf("next scan start at message id %s, wait 2 seconds to start...", t.beforeID))
+		time.Sleep(2 * time.Second)
 	}
 
 	logInfo(t, fmt.Sprintf("reach the max loop, stop at message id %s", t.beforeID))
